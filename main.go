@@ -7,8 +7,11 @@ import (
 )
 
 func main() {
-	loggerA := logger.Init("test-service", "localhost:9092", "topica", false, false)
+	loggerA := logger.Init("test-service", "localhost:9092", "topica", false, true)
 	loggerB := logger.Init("test-service", "localhost:9092", "topicb", false, true)
+
+	defer loggerA.Producer.Producer.Close()
+	defer loggerB.Producer.Producer.Close()
 
 	ctx := context.Background()
 	ctx2 := context.WithValue(ctx, logger.UID, "abc123")
@@ -21,4 +24,5 @@ func main() {
 
 	loggerA.CInfo(ctx2, "topic-a log 3")
 	loggerB.CInfo(ctx2, "topic-b log 3")
+
 }

@@ -2,9 +2,11 @@ package logger
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"sync"
 
-	"github.com/segmentio/kafka-go"
+	kafka "github.com/segmentio/kafka-go"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -15,7 +17,8 @@ type (
 	// Logger type embeds zap and also contains the current system name (namespace, Ns)
 	Logger struct {
 		*zap.Logger
-		Ns string
+		Ns       string
+		Producer *KafkaProducer
 	}
 
 	// KConfig type for creating a new Kafka logger. Takes a Namespace,
@@ -27,14 +30,9 @@ type (
 		Async     bool
 	}
 
-	producerInterface interface {
-		WriteMessages(ctx context.Context, msgs ...kafka.Message) error
-	}
-
 	// KafkaProducer contains a kafka.Producer and Kafka topic
 	KafkaProducer struct {
-		Producer producerInterface
-		Topic    string
+		Producer *kafka.Writer
 	}
 )
 
@@ -82,15 +80,22 @@ var kafkaPriority = zap.LevelEnablerFunc(func(lvl zapcore.Level) bool {
 func Init(namespace, broker, topic string, debug, async bool) *Logger {
 	var kp *KafkaProducer = nil
 	if broker != "" && topic != "" {
-		kp = NewKafkaProducer(&KConfig{
-		Broker: broker,
-		Topic:  topic,
-		Async:  async,
-	})
+		kp = &KafkaProducer{
+			Producer: &kafka.Writer{
+				Addr:         kafka.TCP(broker),
+				Topic:        topic,
+				Async:        async,
+				BatchTimeout: 1,
+				RequiredAcks: kafka.RequireAll,
+				Completion: func(messages []kafka.Message, err error) {
+					fmt.Println(err)
+				},
+			},
+		}
 	}
 	logger := getLogger(debug, kp)
-	// logger.Info("initiated logger", zap.String("ns", namespace), zap.Bool("kafka", kp != nil), zap.Bool("debug", debug))
-	return &Logger{logger, namespace}
+	logger.Info("initiated logger", zap.String("ns", namespace), zap.Bool("kafka", kp != nil), zap.Bool("debug", debug))
+	return &Logger{logger, namespace, kp}
 }
 
 func getLogger(debug bool, kp *KafkaProducer) *zap.Logger {
@@ -130,24 +135,16 @@ func ctxToZapFields(ctx context.Context) []zap.Field {
 	}
 }
 
-// NewKafkaProducer instantiates a kafka.Producer, saves topic, and returns a KafkaProducer
-func NewKafkaProducer(c *KConfig) *KafkaProducer {
-	return &KafkaProducer{
-		Producer: kafka.NewWriter(kafka.WriterConfig{
-			Brokers:      []string{c.Broker},
-			Topic:        c.Topic,
-			Balancer:     &kafka.Hash{},
-			Async:        c.Async,
-			RequiredAcks: -1, // -1 = all
-		}),
-		Topic: c.Topic,
-	}
-}
+var mu sync.Mutex
 
 // Write takes a message as a byte slice, wraps in a kafka.message and calls kafka Produce
 func (kp *KafkaProducer) Write(msg []byte) (int, error) {
-	return len(msg), kp.Producer.WriteMessages(context.Background(), kafka.Message{
+	mu.Lock()
+	defer mu.Unlock()
+	err := kp.Producer.WriteMessages(context.Background(), kafka.Message{
 		Key:   []byte(""),
 		Value: msg,
 	})
+
+	return len(msg), err
 }
