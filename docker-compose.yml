@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  
+  zookeeper:
+    image: confluentinc/cp-zookeeper
+    networks:
+      - kafka-net
+    container_name: zookeeper
+    environment:
+        ZOOKEEPER_CLIENT_PORT: 2181
+    ports:
+        - 2181:2181
+
+  kafka:
+    image: confluentinc/cp-kafka
+    networks:
+      - kafka-net
+    container_name: kafka
+    environment:
+        KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+        KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+        ALLOW_PLAINTEXT_LISTENER: "yes"
+        KAFKA_LISTENERS-INTERNAL: //kafka:29092,EXTERNAL://localhost:9092
+        KAFKA_ADVERTISED: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+        KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+        KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+        KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+    ports:
+        - 9092:9092
+        - 29092:29092
+    depends_on:
+        - zookeeper
+    restart: on-failure
+
+networks:
+  kafka-net:
+    driver: bridge
